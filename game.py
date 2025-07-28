@@ -13,13 +13,20 @@ class Game:
         pygame.display.set_caption("Зомби-Апокалипсис: Выживание")
         self.clock = pygame.time.Clock()
         self.running = True
-        self.state = "start"
+        self.state = "intro"  # ✅ Стартуем с заставки
         self.fullscreen = False
 
-        # ✅ Добавляем размеры как атрибуты
+        # ✅ Шрифты (для модулей)
+        self.font_small = font_small
+        self.font_medium = font_medium
+        self.font_large = font_large
+        self.font_title = font_title
+
+        # ✅ Размеры
         self.SCREEN_WIDTH = SCREEN_WIDTH
         self.SCREEN_HEIGHT = SCREEN_HEIGHT
 
+        # Игровые данные
         self.player = None
         self.world = WorldMap()
         self.log = []
@@ -28,12 +35,19 @@ class Game:
         self.event_choices = []
         self.mods = []
 
-        # ✅ Таймеры для событий
+        # ✅ Таймеры
         self.event_timer = 0
-        self.global_event_timer = 0  # ← Эта строка была пропущена!
+        self.global_event_timer = 0
 
+        # Кнопки
         self.create_buttons()
+
+        # ✅ Загружаем модули
         self.mods = load_mods(self)
+
+        # ✅ Если intro не запустился — fallback
+        if self.state == "intro":
+            self.state = "start"  # на случай, если mod_intro не загружен
 
     def create_buttons(self):
         self.start_buttons = [
@@ -62,7 +76,6 @@ class Game:
             "buttons": {"x": self.SCREEN_WIDTH - 210, "y": self.SCREEN_HEIGHT - PANEL_HEIGHT + 20},
             "inventory": {"x": 750, "y": 220, "w": 450, "h": 300}
         }
-
         self.ui_mode = False
         self.dragging = None
 
@@ -71,16 +84,20 @@ class Game:
         self.log.append("🔧 Режим редактирования UI: " + ("ВКЛ" if self.ui_mode else "ВЫКЛ"))
 
     def start_game(self):
-        self.player = Character()
-        self.player.game = self
+        if not self.player:
+            self.player = Character()
+            self.player.game = self
         self.state = "playing"
         self.log = ["Вы проснулись в разрушенном городе..."]
+        self.log.append("Зомби повсюду. Радиосигналы молчат.")
+        self.log.append("Выживание — единственный путь.")
 
     def new_game(self):
         self.state = "start"
         self.log = []
         self.current_event = None
         self.event_choices = []
+        self.player = None  # ✅ Пересоздаём игрока
 
     def quit(self):
         self.running = False
@@ -90,27 +107,27 @@ class Game:
             self.show_inventory = not self.show_inventory
 
     def eat(self):
-        if not self.current_event:
+        if not self.current_event and self.player:
             msg = self.player.eat()
             self.log.append(msg)
 
     def drink(self):
-        if not self.current_event:
+        if not self.current_event and self.player:
             msg = self.player.drink()
             self.log.append(msg)
 
     def heal(self):
-        if not self.current_event:
+        if not self.current_event and self.player:
             msg = self.player.heal()
             self.log.append(msg)
 
     def search(self):
-        if not self.current_event:
+        if not self.current_event and self.player:
             msg = self.player.search_supplies()
             self.log.append(msg)
 
     def next_day(self):
-        if not self.player.alive or self.current_event:
+        if not self.player or not self.player.alive or self.current_event:
             return
 
         self.player.update()
@@ -145,46 +162,47 @@ class Game:
                         self.SCREEN_WIDTH, self.SCREEN_HEIGHT = SCREEN_WIDTH, SCREEN_HEIGHT
                     return
 
-            if self.ui_mode and event.type == pygame.MOUSEBUTTONDOWN:
-                for name, el in self.ui_elements.items():
-                    if name == "map":
-                        rect = pygame.Rect(el["x"], el["y"], el["size"], el["size"])
-                    elif name == "buttons":
-                        continue
-                    else:
-                        rect = pygame.Rect(el["x"], el["y"], el["w"], el["h"])
-                    if rect.collidepoint(mouse_pos):
-                        self.dragging = name
-                        break
-
-            elif event.type == pygame.MOUSEBUTTONUP:
-                self.dragging = None
-
-            elif event.type == pygame.MOUSEMOTION and self.dragging:
-                dx, dy = event.rel
-                el = self.ui_elements[self.dragging]
-                el["x"] += dx
-                el["y"] += dy
-
-            if not self.ui_mode:
-                if self.current_event:
+            # ✅ Обработка пробела и клика ТОЛЬКО в intro
+            if self.state == "intro":
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                    # Если модуль intro не загружен — просто начать
+                    if not any(hasattr(mod, "finish_current_line") for mod in self.mods):
+                        self.state = "start"
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if not any(hasattr(mod, "finish_current_line") for mod in self.mods):
+                        self.state = "start"
+            else:
+                # Остальные события
+                if self.ui_mode and event.type == pygame.MOUSEBUTTONDOWN:
+                    for name, el in self.ui_elements.items():
+                        if name == "map":
+                            rect = pygame.Rect(el["x"], el["y"], el["size"], el["size"])
+                        elif name == "buttons":
+                            continue
+                        else:
+                            rect = pygame.Rect(el["x"], el["y"], el["w"], el["h"])
+                        if rect.collidepoint(mouse_pos):
+                            self.dragging = name
+                            break
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    self.dragging = None
+                elif event.type == pygame.MOUSEMOTION and self.dragging:
+                    dx, dy = event.rel
+                    el = self.ui_elements[self.dragging]
+                    el["x"] += dx
+                    el["y"] += dy
+                elif self.current_event:
                     for btn in self.event_choices:
                         btn.check_hover(mouse_pos)
                         if btn.handle_event(event):
                             return
-                    return
-
-                buttons = []
-                if self.state == "start":
-                    buttons = self.start_buttons
-                elif self.state == "playing":
-                    buttons = self.game_buttons
-                elif self.state == "game_over":
-                    buttons = self.game_over_buttons
-
-                for btn in buttons:
-                    btn.check_hover(mouse_pos)
-                    btn.handle_event(event)
+                else:
+                    buttons = self.start_buttons if self.state == "start" else \
+                              self.game_buttons if self.state == "playing" else \
+                              self.game_over_buttons
+                    for btn in buttons:
+                        btn.check_hover(mouse_pos)
+                        btn.handle_event(event)
 
     def draw_start(self):
         title = font_title.render("ЗОМБИ-АПОКАЛИПСИС", True, ACCENT)
@@ -314,6 +332,7 @@ class Game:
             self.draw_game()
         elif self.state == "game_over":
             self.draw_game_over()
+        # ✅ mod_intro управляет отрисовкой intro
         pygame.display.flip()
 
     def run(self):
